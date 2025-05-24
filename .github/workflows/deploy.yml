@@ -51,12 +51,18 @@ jobs:
         container-name: ${{ env.CONTAINER_NAME }}
         image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
+    - name: Register task definition
+      id: register-task
+      run: |
+        TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json file://${{ steps.task-def.outputs.task-definition }} --query 'taskDefinition.taskDefinitionArn' --output text)
+        echo "::set-output name=task-def-arn::$TASK_DEF_ARN"
+
     - name: Create or update ECS service
       run: |
         # Check if service exists
         if aws ecs describe-services --cluster ${{ env.ECS_CLUSTER }} --services ${{ env.ECS_SERVICE }} --query 'services[0].status' --output text 2>/dev/null | grep -q "ACTIVE"; then
           echo "Service exists, updating..."
-          aws ecs update-service --cluster ${{ env.ECS_CLUSTER }} --service ${{ env.ECS_SERVICE }} --task-definition ${{ steps.task-def.outputs.task-definition }}
+          aws ecs update-service --cluster ${{ env.ECS_CLUSTER }} --service ${{ env.ECS_SERVICE }} --task-definition ${{ steps.register-task.outputs.task-def-arn }}
         else
           echo "Service does not exist, creating..."
           # Get default VPC and subnet
@@ -74,7 +80,7 @@ jobs:
           aws ecs create-service \
             --cluster ${{ env.ECS_CLUSTER }} \
             --service-name ${{ env.ECS_SERVICE }} \
-            --task-definition ${{ steps.task-def.outputs.task-definition }} \
+            --task-definition ${{ steps.register-task.outputs.task-def-arn }} \
             --desired-count 1 \
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_ID],securityGroups=[$SG_ID],assignPublicIp=ENABLED}"
